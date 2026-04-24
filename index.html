@@ -628,7 +628,7 @@ function handleRequest(e) {
 function getAllData() {
   const ss = SHEET_ID;
   const empSheet  = ss.getSheetByName('Employees')  || ss.insertSheet('Employees');
-  const attSheet  = ss.getSheetByName('Attendance') || ss.insertSheet('Attendance');
+  const attSheet  = ss.getSheetByName('Employees') || ss.insertSheet('Employees');
 
   // Setup headers if empty
   if (empSheet.getLastRow() === 0) {
@@ -660,7 +660,7 @@ function addEmployee(data) {
 
 function logAttendance(data) {
   const ss = SHEET_ID;
-  const sheet = ss.getSheetByName('Attendance') || ss.insertSheet('Attendance');
+  const sheet = ss.getSheetByName('Employees') || ss.insertSheet('Employees');
   if (sheet.getLastRow() === 0)
     sheet.appendRow(['ID','EmpID','Name','Department','Type','Date','Time','Timestamp','Duration','City','Latitude','Longitude','Method']);
 
@@ -730,7 +730,7 @@ let employees   = [];   // from Google Sheets
 let logs        = [];   // from Google Sheets
 let faceData    = {};   // {empId: {descriptors:[], images:[]}} — localStorage only
 let faceMatcher = null;
-let modelsReady = false;
+let modelsReady = falsec
 let THRESHOLD   = 0.40;
 let MATCH_COOLDOWN = 5000;
 let scanMode = 'in';
