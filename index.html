@@ -679,22 +679,6 @@ function deleteEmployee(data) {
   const ss = SHEET_ID;
   const sheet = ss.getSheetByName('Employees');
   if (!sheet) return { status:'error', message:'Sheet not found' };
-  const rows = sheet.getDataRange().getValues();
-  for (let i = rows.length - 1; i >= 1; i--) {
-    if (rows[i][0] === data.id) { sheet.deleteRow(i + 1); break; }
-  }
-  return { status:'ok', message:'Employee deleted' };
-}
-
-function dataToObjects(sheet) {
-  if (sheet.getLastRow() < 2) return [];
-  const [headers, ...rows] = sheet.getDataRange().getValues();
-  return rows.map(row => {
-    const obj = {};
-    headers.forEach((h, i) => obj[h] = row[i]);
-    return obj;
-  });
-}</div>
         </div>
         <div class="info-box" style="margin-top:6px">
           ✅ Your Web App URL is already set in this app.<br>
@@ -720,14 +704,10 @@ function dataToObjects(sheet) {
 // ════════════════════════════════════════════════════
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbzqSurojHe9-Z9v_LXfeiPFRhOXrM_lztn0GVF-sv_6YJDzHQfFKDUhQcYDcAkWrQOS0w/exec';
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
-const EMP_COLORS = ['#00d4ff','#00ff9d','#ffa502','#ff6b81','#a29bfe','#fd79a8','#55efc4','#fdcb6e'];
-const LOCAL_KEY  = 'attendiq_face_data'; // face descriptors only (not synced to sheets)
-
-// ════════════════════════════════════════════════════
-//  STATE
-// ════════════════════════════════════════════════════
-let employees   = [];   // from Google Sheets
-let logs        = [];   // from Google Sheets
+const EMP_COLORS = ['#00d4ff', '#00ff9d', '#ffa502', '#ff6b81', '#a29bfe', '#fd79a8', '#55efc4', '#fdcb6e'];
+const LOCAL_KEY = 'attendiq_face_data';
+let employees = []; 
+let logs = []; // from Google Sheets
 let faceData    = {};   // {empId: {descriptors:[], images:[]}} — localStorage only
 let faceMatcher = null;
 let modelsReady = false;
@@ -822,14 +802,22 @@ async function testConnection() {
     el.style.color = 'var(--red)';
     setGSStatus('error', 'Connection failed');
 showToast('Connection failed: ' + e.message, 'error');
+} else {
+      throw new Error(res.message);
+    }
+  } catch (e) {
+    el.textContent = '✗ Failed: ' + e.message;
+    el.style.color = 'var(--red)';
+    setGSStatus('error', 'Connection failed');
+    showToast('Connection failed: ' + e.message, 'error');
+  }
 }
- 
+
 async function loadFromSheets() {
   try {
     const res = await gasRequest({ action: 'getAll' });
     if (res.status !== 'ok') throw new Error(res.message);
 
-    // This section below fixes the error on Row 832
     employees = (res.employees || []).map(r => ({
       id: r.ID || r.id,
       name: r.Name || r.name,
@@ -840,14 +828,12 @@ async function loadFromSheets() {
       createdAt: r.CreatedAt || r.createdAt
     })).filter(e => e.id);
 
-renderEmployeeList();
-} catch (e) {
-console.error("Load error:", e);
-showToast("Failed to load data", "error");
-}
-}
-
-function pairSessions(){
+    renderEmployeeList();
+  } catch (e) {
+    console.error("Load error:", e);
+    showToast("Failed to load data", "error");
+  }
+   function pairSessions(){
   // Pair in/out entries
   const paired=new Set();
   for(const l of logs){
