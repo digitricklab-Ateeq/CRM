@@ -805,6 +805,17 @@ function drawBox(ctx,box,color,label){
   ctx.fillStyle=color+'cc';ctx.fillRect(box.x,box.y-24,lw,24);
   ctx.fillStyle='#000';ctx.font='bold 12px Outfit,sans-serif';ctx.fillText(label,box.x+7,box.y-7);
 }
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzSshYJ-v22AKGE1XsZVKJaRMLaotRnFNQcsNxUKmfUIEi4qaKoceym37m8lOqf3VE_/exec'; // <--- PASTE YOUR LINK HERE
+
+async function saveToSheets(data) {
+    try {
+        await fetch(GOOGLE_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify(data)
+        });
+    } catch (e) { console.error("Sheet Error:", e); }
+}
 
 async function processRecognition(empId){
   const emp=employees.find(e=>e.id===empId);if(!emp)return;
@@ -813,10 +824,12 @@ async function processRecognition(empId){
     if(isLoggedIn(emp.id)){showScanResult(emp,'already',ts,loc,null);return;}
     logs.push({id:uid(),empId:emp.id,type:'in',ts,loc,pairedOut:null,method:'face'});
     showToast(`✓ ${emp.name} clocked IN`);
+    saveToSheets({name: emp.name, type: 'IN', time: fmtTime(ts), date: fmtDate(ts), location: loc.city});
   } else {
     const sess=[...logs].reverse().find(l=>l.empId===emp.id&&l.type==='in'&&!l.pairedOut);
     if(!sess){showScanResult(emp,'notin',ts,loc,null);return;}
     const dur=new Date(ts)-new Date(sess.ts);
+    saveToSheets({name: emp.name, type: 'OUT', time: fmtTime(ts), date: fmtDate(ts), location: loc.city});
     const entry={id:uid(),empId:emp.id,type:'out',ts,loc,pairedIn:sess.id,method:'face'};
     sess.pairedOut=entry.id;logs.push(entry);
     showToast(`✓ ${emp.name} clocked OUT — ${fmtDur(dur)}`);
