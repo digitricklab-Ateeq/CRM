@@ -718,8 +718,8 @@ function dataToObjects(sheet) {
 // ════════════════════════════════════════════════════
 //  CONFIG — Google Apps Script URL
 // ════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzJesq4R-Awc8rY440T96nLJ3HMyoZviC2uRTMatnHphH7_TmyYHsMwZ-tARCmdh2J1Yg/exec';
-const './models'; = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+const GAS_URL = 'https://script.google.com/macros/s/AKfy.../exec';
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
 const EMP_COLORS = ['#00d4ff','#00ff9d','#ffa502','#ff6b81','#a29bfe','#fd79a8','#55efc4','#fdcb6e'];
 const LOCAL_KEY  = 'attendiq_face_data'; // face descriptors only (not synced to sheets)
 
@@ -801,79 +801,50 @@ async function gasPost(payload) {
   }
 }
 
-async function testConnection(){
-  const el=document.getElementById('test-result');
-  el.textContent='Testing…'; el.style.color='var(--warn)';
-  try{
-    const res = await gasRequest({action:'ping'});
-    if(res.status==='ok'){
-      el.textContent='✓ Connected: '+res.message;
-      el.style.color='var(--green)';
-      setGSStatus('ready','Connected to Google Sheets');
+async function testConnection() {
+  const el = document.getElementById('test-result');
+  el.textContent = 'Connecting...';
+  try {
+    const resp = await fetch(GAS_URL + '?action=test');
+    const res = await resp.json();
+    
+    if (res.status === 'ok') {
+      el.textContent = '✓ Connected: ' + res.message;
+      el.style.color = 'var(--green)';
+      setGSStatus('ready', 'Connected to Google Sheets');
       showToast('Google Sheets connected!');
-      gsConnected=true;
+      gsConnected = true;
     } else {
       throw new Error(res.message);
     }
-  }catch(e){
-    el.textContent='✗ Failed: '+e.message;
-    el.style.color='var(--red)';
-    setGSStatus('error','Connection failed');
-    showToast('Connection failed: '+e.message,'error');
-  }
+  } catch (e) {
+    el.textContent = '✗ Failed: ' + e.message;
+    el.style.color = 'var(--red)';
+    setGSStatus('error', 'Connection failed');
+showToast('Connection failed: ' + e.message, 'error');
 }
+ 
+async function loadFromSheets() {
+  try {
+    const res = await gasRequest({ action: 'getAll' });
+    if (res.status !== 'ok') throw new Error(res.message);
 
-async function loadFromSheets(){
-  setSyncBadge('syncing','Syncing…');
-  try{
-    const res = await gasRequest({action:'getAll'});
-    if(res.status!=='ok') throw new Error(res.message);
+    // This section below fixes the error on Row 832
+    employees = (res.employees || []).map(r => ({
+      id: r.ID || r.id,
+      name: r.Name || r.name,
+      email: r.Email || r.email,
+      dept: r.Department || r.dept,
+      role: r.Role || r.role,
+      color: r.Color || r.color || EMP_COLORS[0],
+      createdAt: r.CreatedAt || r.createdAt
+    })).filter(e => e.id);
 
-    // Map employees from sheet columns
-    employees = (res.employees||[]).map(r=>({
-      id:      r.ID    ||r.id,
-      name:    r.Name  ||r.name,
-      email:   r.Email ||r.email,
-      dept:    r.Department||r.dept,
-      role:    r.Role  ||r.role,
-      color:   r.Color ||r.color||EMP_COLORS[0],
-      createdAt:r.CreatedAt||r.createdAt,
-    })).filter(e=>e.id);
-
-    // Map attendance from sheet columns
-    logs = (res.attendance||[]).map(r=>({
-      id:        r.ID        ||r.id,
-      empId:     r.EmpID     ||r.empId,
-      type:      (r.Type     ||r.type||'').toLowerCase(),
-      ts:        r.Timestamp ||r.ts,
-      pairedOut: null,
-      method:    r.Method    ||r.method||'face',
-      loc:{
-        city: r.City||r.city||'',
-        lat:  parseFloat(r.Latitude||r.lat)||0,
-        lng:  parseFloat(r.Longitude||r.lng)||0,
-      }
-    })).filter(l=>l.id&&l.empId);
-
-    // Rebuild pairedOut links
-    pairSessions();
-    // Rebuild face matcher
-    rebuildMatcher();
-
-    setSyncBadge('synced','Synced');
-    setGSStatus('ready',`Synced · ${employees.length} employees · ${logs.length} logs`);
-    gsConnected=true;
-    renderDashboard();
-    if(document.getElementById('page-employees').classList.contains('active')) renderEmployees();
-    if(document.getElementById('page-logs').classList.contains('active')) renderLogs();
-    if(document.getElementById('page-scan').classList.contains('active')) renderScanEmpList();
-    showToast(`Synced: ${employees.length} employees, ${logs.length} records`,'info');
-  }catch(e){
-    setSyncBadge('error','Sync failed');
-    setGSStatus('error','Sync error');
-    showToast('Sync failed: '+e.message,'error');
-    console.error(e);
-  }
+renderEmployeeList();
+} catch (e) {
+console.error("Load error:", e);
+showToast("Failed to load data", "error");
+}
 }
 
 function pairSessions(){
