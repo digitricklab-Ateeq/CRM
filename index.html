@@ -768,604 +768,91 @@ async function scanTick(){
   const v=document.getElementById('scan-video');
   if(!scanStream||v.readyState<2){scanRaf=requestAnimationFrame(scanTick);return;}
   const opts=new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.4});
-  const dets=await faceapi.detectAllFaces(v,opts).withFaceLandmarks(true).withFaceDescriptors();
-  const canvas=document.getElementById('scan-canvas');
-  faceapi.matchDimensions(canvas,{width:v.videoWidth,height:v.videoHeight});
-  canvas.style.display='block';
-  const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
-  const resized=faceapi.resizeResults(dets,{width:v.videoWidth,height:v.videoHeight});
-  if(!dets.length){setLbl('No face — look at camera','scanning');scanRaf=requestAnimationFrame(scanTick);return;}
-  setLbl('Matching…','scanning');
-  for(const d of resized){
-    const box=d.detection.box;
-    if(faceMatcher){
-      const match=faceMatcher.findBestMatch(d.descriptor);
-      const hit=match.label!=='unknown';
-      drawBox(ctx,box,hit?'#00ff9d':'#ff4757',hit?(employees.find(e=>e.id===match.label)?.name||match.label):'Unknown');
-      if(hit){
-        const t=Date.now();
-        if(match.label!==lastMatchId||(t-lastMatchTime)>MATCH_COOLDOWN){
-          lastMatchId=match.label;lastMatchTime=t;
-          setLbl('✓ Matched!','matched');
+ const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 });
+  const dets = await faceapi.detectAllFaces(v, opts).withFaceLandmarks(true).withFaceDescriptors();
+  const canvas = document.getElementById('scan-canvas');
+  faceapi.matchDimensions(canvas, { width: v.videoWidth, height: v.videoHeight });
+  canvas.style.display = 'block';
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const resized = faceapi.resizeResults(dets, { width: v.videoWidth, height: v.videoHeight });
+
+  if (!dets.length) {
+    setLbl('No face — look at camera', 'scanning');
+    scanRaf = requestAnimationFrame(scanTick);
+    return;
+  }
+
+  setLbl('Matching...', 'scanning');
+
+  for (const d of resized) {
+    const box = d.detection.box;
+    if (faceMatcher) {
+      const match = faceMatcher.findBestMatch(d.descriptor);
+      const hit = match.label !== 'unknown';
+      const emp = employees.find(e => e.id === match.label);
+      
+      // Visual feedback
+      drawBox(ctx, box, hit ? '#00ff9d' : '#ff4757', hit ? (emp?.name || match.label) : 'Unknown');
+
+      if (hit) {
+        const t = Date.now();
+        if (match.label !== lastMatchId || (t - lastMatchTime) > MATCH_COOLDOWN) {
+          lastMatchId = match.label;
+          lastMatchTime = t;
+          
+          setLbl('✓ Matched: ' + (emp?.name || ''), 'matched');
+
+          // SAVE TO GOOGLE SHEETS
+          saveToSheets({
+            name: emp?.name || match.label,
+            type: scanMode.toUpperCase(),
+            time: new Date().toLocaleTimeString(),
+            date: new Date().toLocaleDateString(),
+            location: "Office Main"
+          });
+
           await processRecognition(match.label);
         } else {
-          setLbl('✓ '+(employees.find(e=>e.id===match.label)?.name||'')+'  (cooldown)','matched');
+          setLbl('✓ ' + (emp?.name || '') + ' (cooldown)', 'matched');
         }
-      } else {setLbl('Face not recognised','nomatch');}
+      } else {
+        setLbl('Face not recognised', 'nomatch');
+      }
     } else {
-      drawBox(ctx,box,'#ffa502','No employees enrolled');
-      setLbl('No employees enrolled','nomatch');
+      drawBox(ctx, box, '#ffa502', 'No employees enrolled');
+      setLbl('No employees enrolled', 'nomatch');
     }
   }
-  scanRaf=requestAnimationFrame(scanTick);
-}
-function drawBox(ctx,box,color,label){
-  ctx.strokeStyle=color;ctx.lineWidth=3;ctx.strokeRect(box.x,box.y,box.width,box.height);
-  const lw=Math.max(box.width,label.length*8+16);
-  ctx.fillStyle=color+'cc';ctx.fillRect(box.x,box.y-24,lw,24);
-  ctx.fillStyle='#000';ctx.font='bold 12px Outfit,sans-serif';ctx.fillText(label,box.x+7,box.y-7);
-}
-const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzSshYJ-v22AKGE1XsZVKJaRMLaotRnFNQcsNxUKmfUIEi4qaKoceym37m8lOqf3VE_/exec'; // <--- PASTE YOUR LINK HERE
 
+  scanRaf = requestAnimationFrame(scanTick);
+}
+
+// --- HELPER FUNCTIONS (OUTSIDE OF SCANTICK) ---
+
+function drawBox(ctx, box, color, label) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(box.x, box.y, box.width, box.height);
+  const lw = Math.max(box.width, label.length * 8 + 16);
+  ctx.fillStyle = color + 'cc';
+  ctx.fillRect(box.x, box.y - 24, lw, 24);
+  ctx.fillStyle = '#000';
+  ctx.font = 'bold 12px Outfit, sans-serif';
+  ctx.fillText(label, box.x + 7, box.y - 7);
+}
+
+const GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxsQcpGicXRPN9msrHiOT_BMIDMDASpE60YOOd1QYCYz25ryX4XHRpHmZ8Ntj93b-48/exec';
 async function saveToSheets(data) {
-    try {
-        await fetch(GOOGLE_SCRIPT_URL, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify(data)
-        });
-    } catch (e) { console.error("Sheet Error:", e); }
-}
-
-async function processRecognition(empId){
-  const emp=employees.find(e=>e.id===empId);if(!emp)return;
-  const loc=await getLocation();const ts=nowTs();
-  if(scanMode==='in'){
-    if(isLoggedIn(emp.id)){showScanResult(emp,'already',ts,loc,null);return;}
-    logs.push({id:uid(),empId:emp.id,type:'in',ts,loc,pairedOut:null,method:'face'});
-    showToast(`✓ ${emp.name} clocked IN`);
-    saveToSheets({name: emp.name, type: 'IN', time: fmtTime(ts), date: fmtDate(ts), location: loc.city});
-  } else {
-    const sess=[...logs].reverse().find(l=>l.empId===emp.id&&l.type==='in'&&!l.pairedOut);
-    if(!sess){showScanResult(emp,'notin',ts,loc,null);return;}
-    const dur=new Date(ts)-new Date(sess.ts);
-    saveToSheets({name: emp.name, type: 'OUT', time: fmtTime(ts), date: fmtDate(ts), location: loc.city});
-    const entry={id:uid(),empId:emp.id,type:'out',ts,loc,pairedIn:sess.id,method:'face'};
-    sess.pairedOut=entry.id;logs.push(entry);
-    showToast(`✓ ${emp.name} clocked OUT — ${fmtDur(dur)}`);
-    showScanResult(emp,'out',ts,loc,dur);
-    renderDashboard();renderScanEmpList();saveData();return;
+  try {
+    const params = new URLSearchParams(data).toString();
+    const uploadUrl = `${GOOGLE_SCRIPT_URL}?${params}`;
+    await fetch(uploadUrl, {method: 'GET', mode: 'no-cors'});
+    console.log("Data sent to Google Sheets successfully");
+  } catch (e) {
+    console.error("Sheet Error:", e);
   }
-  showScanResult(emp,scanMode,ts,loc,null);
-  renderDashboard();renderScanEmpList();saveData();
 }
-function showScanResult(emp,type,ts,loc,dur){
-  const map={in:{cls:'in',icon:'🟢',lbl:'CLOCKED IN'},out:{cls:'out',icon:'🔴',lbl:'CLOCKED OUT'},already:{cls:'warn',icon:'🟡',lbl:'ALREADY IN'},notin:{cls:'warn',icon:'🟡',lbl:'NOT CLOCKED IN'}};
-  const t=map[type]||map.in;
-  document.getElementById('scan-result-box').innerHTML=`
-    <div class="face-result ${t.cls}">
-      ${faceImg(emp,52,'')}
-      <div style="flex:1">
-        <div style="font-family:var(--fh);font-size:16px;font-weight:700">${emp.name}</div>
-        <div class="emp-meta">${emp.dept}·${emp.role}</div>
-        <div style="font-size:12px;margin-top:5px"><span style="font-weight:700;color:${type==='in'?'var(--green)':type==='out'?'var(--red)':'var(--warn)'}">${t.icon} ${t.lbl}</span>
-          ${type==='in'||type==='out'?` at ${fmtTime(ts)}`:''}
-          ${dur?`<span style="color:var(--muted)"> · ${fmtDur(dur)}</span>`:''}
-        </div>
-        <div style="font-size:10px;color:var(--muted2);font-family:var(--fm);margin-top:2px">📍${loc.city} (${loc.lat.toFixed(4)},${loc.lng.toFixed(4)})</div>
-      </div>
-      <div style="font-size:32px">${t.icon}</div>
-    </div>`;
-}
-
-// ════════════════════════════════════════════════════════
-//  REGISTRATION CAMERA
-// ════════════════════════════════════════════════════════
-let lastRegDet=null;
-async function startRegCam(){
-  if(!modelsReady){showToast('Models loading…','warn');return;}
-  try{
-    if(regStream)stopRegCam();
-    regStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:480},height:{ideal:480}},audio:false});
-    const v=document.getElementById('reg-video');
-    v.srcObject=regStream;v.style.display='block';
-    document.getElementById('reg-idle').style.display='none';
-    document.getElementById('btn-reg-start').style.display='none';
-    document.getElementById('btn-reg-snap').style.display='';
-    document.getElementById('btn-reg-stop').style.display='';
-    v.onloadedmetadata=()=>{v.play();regTick();};
-  }catch(e){showToast(e.name==='NotAllowedError'?'Camera permission denied':'Camera error','error');}
-}
-function stopRegCam(){
-  if(regStream){regStream.getTracks().forEach(t=>t.stop());regStream=null;}
-  if(regRaf){cancelAnimationFrame(regRaf);regRaf=null;}
-  const v=document.getElementById('reg-video');
-  v.srcObject=null;v.style.display='none';
-  document.getElementById('reg-idle').style.display='flex';
-  document.getElementById('btn-reg-start').style.display='';
-  document.getElementById('btn-reg-snap').style.display='none';
-  document.getElementById('btn-reg-stop').style.display='none';
-  setRegSt('Camera stopped','');
-}
-async function regTick(){
-  const v=document.getElementById('reg-video');
-  if(!regStream||v.readyState<2){regRaf=requestAnimationFrame(regTick);return;}
-  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:224,scoreThreshold:0.5});
-  const det=await faceapi.detectSingleFace(v,opts).withFaceLandmarks(true).withFaceDescriptor();
-  const canvas=document.getElementById('reg-canvas');
-  faceapi.matchDimensions(canvas,{width:v.videoWidth,height:v.videoHeight});
-  canvas.style.display='block';
-  const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);
-  if(det){
-    lastRegDet=det;
-    const b=faceapi.resizeResults(det,{width:v.videoWidth,height:v.videoHeight}).detection.box;
-    ctx.strokeStyle='#00ff9d';ctx.lineWidth=3;ctx.strokeRect(b.x,b.y,b.width,b.height);
-    setRegSt('✓ Face detected — click 📸 Capture','good');
-  } else {
-    lastRegDet=null;
-    setRegSt('Position face in frame…','detecting');
-  }
-  regRaf=requestAnimationFrame(regTick);
-}
-function setRegSt(msg,cls){const el=document.getElementById('reg-status');el.textContent=msg;el.className='face-status'+(cls?' '+cls:'');}
-
-async function snapFace(){
-  if(!lastRegDet){showToast('No face in frame','warn');return;}
-  if(capturedImages.length>=5){showToast('Max 5 photos','warn');return;}
-  const v=document.getElementById('reg-video');
-  const off=document.createElement('canvas');off.width=v.videoWidth;off.height=v.videoHeight;
-  off.getContext('2d').drawImage(v,0,0);
-  const b=lastRegDet.detection.box;
-  const pad=Math.max(b.width,b.height)*0.28;
-  const fx=Math.max(0,b.x-pad),fy=Math.max(0,b.y-pad);
-  const fw=Math.min(off.width-fx,b.width+pad*2),fh=Math.min(off.height-fy,b.height+pad*2);
-  const crop=document.createElement('canvas');crop.width=120;crop.height=120;
-  crop.getContext('2d').drawImage(off,fx,fy,fw,fh,0,0,120,120);
-  capturedImages.push(crop.toDataURL('image/jpeg',0.85));
-  capturedDescriptors.push(Array.from(lastRegDet.descriptor));
-  renderSnaps();
-  setRegSt(`✓ Photo ${capturedImages.length} captured!`,'good');
-  showToast(`📸 Photo ${capturedImages.length} captured`);
-}
-function renderSnaps(){
-  document.getElementById('snap-count').textContent=capturedImages.length;
-  document.getElementById('captured-faces').innerHTML=capturedImages.map((img,i)=>
-    `<div style="position:relative"><img src="${img}" class="captured-thumb"/>
-    <button class="thumb-del" onclick="deleteSnap(${i})">✕</button></div>`).join('');
-}
-function deleteSnap(i){capturedImages.splice(i,1);capturedDescriptors.splice(i,1);renderSnaps();}
-
-// ════════════════════════════════════════════════════════
-//  ADD EMPLOYEE
-// ════════════════════════════════════════════════════════
-function resetAddForm(){
-  ['inp-name','inp-email','inp-dept','inp-role'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('add-error').style.display='none';
-  capturedImages=[];capturedDescriptors=[];renderSnaps();stopRegCam();
-}
-async function addEmployee(){
-  const name=document.getElementById('inp-name').value.trim();
-  const email=document.getElementById('inp-email').value.trim();
-  const dept=document.getElementById('inp-dept').value.trim();
-  const role=document.getElementById('inp-role').value.trim();
-  const err=document.getElementById('add-error');err.style.display='none';
-  if(!name||!email||!dept||!role){err.textContent='⚠ All fields required.';err.style.display='block';return;}
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){err.textContent='⚠ Invalid email.';err.style.display='block';return;}
-  if(employees.find(e=>e.email.toLowerCase()===email.toLowerCase())){err.textContent='⚠ Email already exists.';err.style.display='block';return;}
-  if(capturedImages.length<3){err.textContent=`⚠ Capture at least 3 face photos (you have ${capturedImages.length}).`;err.style.display='block';return;}
-  const emp={id:'emp'+uid(),name,email,dept,role,color:EMP_COLORS[employees.length%EMP_COLORS.length],faceDescriptors:[...capturedDescriptors],faceImages:[...capturedImages],createdAt:nowTs()};
-  employees.push(emp);
-  rebuildMatcher();
-  saveData();
-  showToast(`✓ ${name} enrolled with ${capturedImages.length} samples!`);
-  stopRegCam();
-  showPage('employees',null);
-}
-
-// ════════════════════════════════════════════════════════
-//  EMPLOYEES PAGE
-// ════════════════════════════════════════════════════════
-function renderEmployees(){
-  const c=document.getElementById('emp-cards');
-  if(!employees.length){c.innerHTML='<div class="empty">No employees yet.</div>';return;}
-  c.innerHTML='';
-  employees.forEach(emp=>{
-    const on=isLoggedIn(emp.id);
-    const el=document.createElement('div');el.className='emp-card';
-    const empLogs=[...logs].filter(l=>l.empId===emp.id).reverse().slice(0,5);
-    const recentHTML=empLogs.length?empLogs.map(l=>`
-      <div class="emp-row" style="padding:6px 0">
-        <div style="width:6px;height:6px;border-radius:50%;background:${l.type==='in'?'var(--green)':'var(--red)'};flex-shrink:0"></div>
-        <span class="badge ${l.type==='in'?'badge-in':'badge-out'}">${l.type==='in'?'IN':'OUT'}</span>
-        <span style="font-size:11px;color:var(--muted)">${fmtDate(l.ts)} ${fmtTime(l.ts)}</span>
-        <span style="font-size:10px;color:var(--muted2);margin-left:auto">📍${l.loc.city}</span>
-      </div>`).join(''):'<div class="empty" style="padding:8px 0">No records.</div>';
-    const thumbs=emp.faceImages?.length
-      ?`<div class="face-strip">${emp.faceImages.map(fi=>`<img src="${fi}"/>`).join('')}</div>`
-      :'';
-    el.innerHTML=`
-      <div class="emp-card-top">
-        ${faceImg(emp,48,'')}
-        <div style="flex:1"><div class="emp-name">${emp.name}</div><div class="emp-meta">${emp.email}</div><div class="emp-meta">${emp.dept}·${emp.role}</div></div>
-        <div style="text-align:right;display:flex;flex-direction:column;gap:5px;align-items:flex-end">
-          <span class="badge ${on?'badge-in':'badge-away'}">${on?'● In':'○ Away'}</span>
-          <span style="font-size:9px;color:var(--muted);font-family:var(--fm)">${emp.faceDescriptors?.length||0} samples</span>
-          <button class="btn btn-danger btn-sm" style="font-size:10px;padding:4px 9px" onclick="event.stopPropagation();confirmDelete('${emp.id}')">🗑</button>
-        </div>
-      </div>
-      <div class="emp-card-expand">
-        ${thumbs?`<div class="form-label" style="margin-bottom:6px">Face Samples</div>${thumbs}`:''}
-        <div class="form-label" style="margin-top:10px;margin-bottom:6px">Recent Attendance</div>
-        ${recentHTML}
-      </div>`;
-    el.querySelector('.emp-card-top').onclick=()=>el.classList.toggle('expanded');
-    c.appendChild(el);
-  });
-}
-function confirmDelete(empId){
-  const emp=employees.find(e=>e.id===empId);
-  showModal(`Delete ${emp?.name}?`,`This will remove the employee and all ${logs.filter(l=>l.empId===empId).length} attendance records. This cannot be undone.`,()=>{
-    employees=employees.filter(e=>e.id!==empId);
-    logs=logs.filter(l=>l.empId!==empId);
-    rebuildMatcher();saveData();renderEmployees();
-    showToast('Employee deleted','warn');
-  },'Delete');
-}
-
-// ════════════════════════════════════════════════════════
-//  LOGS
-// ════════════════════════════════════════════════════════
-function getFilteredLogs(){
-  const q=(document.getElementById('log-filter')?.value||'').toLowerCase();
-  const typeF=document.getElementById('log-filter-type')?.value||'';
-  const dateF=document.getElementById('log-filter-date')?.value||'';
-  const now=new Date();
-  return [...logs].reverse().filter(l=>{
-    const e=employees.find(x=>x.id===l.empId);if(!e)return false;
-    if(q&&!e.name.toLowerCase().includes(q)&&!e.dept.toLowerCase().includes(q))return false;
-    if(typeF&&l.type!==typeF)return false;
-    if(dateF){
-      const d=new Date(l.ts);
-      if(dateF==='today'&&d.toDateString()!==now.toDateString())return false;
-      if(dateF==='week'){const wStart=new Date(now);wStart.setDate(now.getDate()-now.getDay());if(d<wStart)return false;}
-      if(dateF==='month'&&(d.getMonth()!==now.getMonth()||d.getFullYear()!==now.getFullYear()))return false;
-    }
-    return true;
-  });
-}
-function renderLogs(){
-  const filtered=getFilteredLogs();
-  document.getElementById('log-count-txt').textContent=`Showing ${filtered.length} of ${logs.length} records`;
-  const tbody=document.getElementById('log-tbody');
-  if(!filtered.length){tbody.innerHTML='';document.getElementById('log-empty').style.display='block';return;}
-  document.getElementById('log-empty').style.display='none';
-  tbody.innerHTML=filtered.map(l=>{
-    const e=employees.find(x=>x.id===l.empId);if(!e)return'';
-    let dur='—';
-    if(l.type==='out'&&l.pairedIn){const inn=logs.find(x=>x.id===l.pairedIn);if(inn)dur=fmtDur(new Date(l.ts)-new Date(inn.ts));}
-    return`<tr>
-      <td><div style="display:flex;align-items:center;gap:7px">${faceImg(e,28,'')}
-        <div><div style="font-weight:600;font-size:12px">${e.name}</div><div style="font-size:10px;color:var(--muted)">${e.dept}</div></div></div></td>
-      <td><span class="badge ${l.type==='in'?'badge-in':'badge-out'}">${l.type==='in'?'↓IN':'↑OUT'}</span></td>
-      <td style="font-family:var(--fm);color:var(--muted);font-size:11px">${fmtDate(l.ts)}</td>
-      <td style="font-family:var(--fm);font-weight:600;font-size:12px">${fmtTime(l.ts)}</td>
-      <td style="font-family:var(--fm);color:var(--muted);font-size:11px">${dur}</td>
-      <td style="color:var(--muted);font-size:11px">📍${l.loc.city}</td>
-      <td style="font-family:var(--fm);font-size:10px;color:var(--muted2)">${l.loc.lat.toFixed(4)},${l.loc.lng.toFixed(4)}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ════════════════════════════════════════════════════════
-//  EXPORTS
-// ════════════════════════════════════════════════════════
-function logsToRows(subset){
-  return subset.map(l=>{
-    const e=employees.find(x=>x.id===l.empId)||{name:'Unknown',dept:'',role:''};
-    let dur='';
-    if(l.type==='out'&&l.pairedIn){const inn=logs.find(x=>x.id===l.pairedIn);if(inn)dur=fmtDur(new Date(l.ts)-new Date(inn.ts));}
-    return[e.name,e.dept,e.role,l.type.toUpperCase(),fmtDate(l.ts),fmtTime(l.ts),dur,l.loc?.city||'',l.loc?.lat?.toFixed(4)||'',l.loc?.lng?.toFixed(4)||''];
-  });
-}
-function downloadBlob(blob,filename){
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=filename;a.click();
-  setTimeout(()=>URL.revokeObjectURL(url),2000);
-}
-function exportCSV(range='all'){
-  let subset=[...logs].reverse();
-  const now=new Date();
-  if(range==='today') subset=subset.filter(l=>new Date(l.ts).toDateString()===now.toDateString());
-  if(range==='month') subset=subset.filter(l=>{const d=new Date(l.ts);return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});
-  const header=['Employee','Department','Role','Type','Date','Time','Duration','Location','Latitude','Longitude'];
-  const rows=[header,...logsToRows(subset)];
-  const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  downloadBlob(new Blob([csv],{type:'text/csv'}),`AttendIQ_${range}_${new Date().toISOString().slice(0,10)}.csv`);
-  showToast(`CSV exported (${subset.length} records)`);
-}
-function exportExcel(){
-  if(typeof XLSX==='undefined'){showToast('Excel library not loaded','error');return;}
-  const wb=XLSX.utils.book_new();
-  // Attendance sheet
-  const header=['Employee','Department','Role','Type','Date','Time','Duration','Location','Latitude','Longitude'];
-  const rows=logsToRows([...logs].reverse());
-  const ws1=XLSX.utils.aoa_to_sheet([header,...rows]);
-  ws1['!cols']=[{wch:20},{wch:16},{wch:18},{wch:8},{wch:14},{wch:10},{wch:10},{wch:18},{wch:12},{wch:12}];
-  XLSX.utils.book_append_sheet(wb,ws1,'Attendance Log');
-  // Employees sheet
-  const empHeader=['ID','Name','Email','Department','Role','Face Samples','Registered On'];
-  const empRows=employees.map(e=>[e.id,e.name,e.email,e.dept,e.role,e.faceDescriptors?.length||0,e.createdAt?fmtDate(e.createdAt):'']);
-  const ws2=XLSX.utils.aoa_to_sheet([empHeader,...empRows]);
-  ws2['!cols']=[{wch:14},{wch:20},{wch:28},{wch:16},{wch:18},{wch:14},{wch:14}];
-  XLSX.utils.book_append_sheet(wb,ws2,'Employees');
-  // Summary sheet
-  const today=new Date().toDateString();
-  const todayLogs=logs.filter(l=>new Date(l.ts).toDateString()===today);
-  const ws3=XLSX.utils.aoa_to_sheet([
-    ['AttendIQ — Summary Report'],['Generated',new Date().toLocaleString('en-IN')],[],
-    ['Total Employees',employees.length],['Present Today',[...new Set(todayLogs.map(l=>l.empId))].length],
-    ['Currently Clocked In',activeSessions().length],['Total Log Entries',logs.length],
-  ]);
-  XLSX.utils.book_append_sheet(wb,ws3,'Summary');
-  XLSX.writeFile(wb,`AttendIQ_Export_${new Date().toISOString().slice(0,10)}.xlsx`);
-  showToast('Excel file exported!');
-}
-function exportPDF(){
-  const w=window.open('','_blank');
-  const rows=[...logs].reverse();
-  const tableRows=rows.map(l=>{
-    const e=employees.find(x=>x.id===l.empId)||{name:'Unknown',dept:''};
-    let dur='—';
-    if(l.type==='out'&&l.pairedIn){const inn=logs.find(x=>x.id===l.pairedIn);if(inn)dur=fmtDur(new Date(l.ts)-new Date(inn.ts));}
-    return`<tr><td>${e.name}</td><td>${e.dept}</td><td><span class="${l.type==='in'?'in':'out'}">${l.type.toUpperCase()}</span></td>
-      <td>${fmtDate(l.ts)}</td><td>${fmtTime(l.ts)}</td><td>${dur}</td><td>${l.loc?.city||''}</td></tr>`;
-  }).join('');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>AttendIQ Report</title>
-  <style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Segoe UI',sans-serif;padding:32px;color:#1e293b;}
-  h1{font-size:24px;font-weight:800;margin-bottom:4px;color:#6366f1;}
-  .sub{font-size:12px;color:#64748b;margin-bottom:24px;}
-  .stats{display:flex;gap:16px;margin-bottom:24px;}
-  .stat{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 18px;text-align:center;}
-  .sv{font-size:28px;font-weight:800;color:#0f172a;}.sl{font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:1px;}
-  table{width:100%;border-collapse:collapse;font-size:12px;}
-  th{background:#f1f5f9;padding:9px 12px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#64748b;border-bottom:2px solid #e2e8f0;}
-  td{padding:8px 12px;border-bottom:1px solid #f1f5f9;}.in{color:#10b981;font-weight:700;}.out{color:#ef4444;font-weight:700;}
-  tr:hover td{background:#fafafa;}
-  @media print{body{padding:16px;}}
-  </style></head><body>
-  <h1>👁 AttendIQ — Attendance Report</h1>
-  <div class="sub">Generated: ${new Date().toLocaleString('en-IN')} &nbsp;|&nbsp; ${rows.length} total records</div>
-  <div class="stats">
-    <div class="stat"><div class="sv">${employees.length}</div><div class="sl">Employees</div></div>
-    <div class="stat"><div class="sv">${[...new Set(logs.filter(l=>new Date(l.ts).toDateString()===new Date().toDateString()).map(l=>l.empId))].length}</div><div class="sl">Present Today</div></div>
-    <div class="stat"><div class="sv">${activeSessions().length}</div><div class="sl">Currently In</div></div>
-    <div class="stat"><div class="sv">${logs.length}</div><div class="sl">Total Logs</div></div>
-  </div>
-  <table><thead><tr><th>Employee</th><th>Department</th><th>Type</th><th>Date</th><th>Time</th><th>Duration</th><th>Location</th></tr></thead>
-  <tbody>${tableRows||'<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:24px">No records</td></tr>'}</tbody></table>
-  <script>window.onload=()=>window.print();<\/script></body></html>`);
-  w.document.close();
-}
-function exportEmployeesCSV(){
-  const header=['ID','Name','Email','Department','Role','Face Samples','Registered On'];
-  const rows=employees.map(e=>[e.id,e.name,e.email,e.dept,e.role,e.faceDescriptors?.length||0,e.createdAt||'']);
-  const csv=[header,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
-  downloadBlob(new Blob([csv],{type:'text/csv'}),`AttendIQ_Employees_${new Date().toISOString().slice(0,10)}.csv`);
-  showToast('Employee CSV exported!');
-}
-function exportEmployeesJSON(){
-  const data=employees.map(({id,name,email,dept,role,createdAt,faceDescriptors})=>({id,name,email,dept,role,createdAt,faceSamples:faceDescriptors?.length||0}));
-  downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`AttendIQ_Employees_${new Date().toISOString().slice(0,10)}.json`);
-  showToast('Employee JSON exported!');
-}
-
-// ════════════════════════════════════════════════════════
-//  SETTINGS & BACKUP
-// ════════════════════════════════════════════════════════
-function refreshStorageInfo(){
-  try{
-    const raw=localStorage.getItem(STORAGE_KEY)||'{}';
-    const kb=(raw.length*2/1024).toFixed(1);
-    const maxKB=5120;
-    const pct=Math.min(100,(raw.length*2/1024/maxKB*100)).toFixed(1);
-    document.getElementById('storage-info').innerHTML=
-      `Employees: ${employees.length} &nbsp;|&nbsp; Log entries: ${logs.length}<br>
-       Storage used: ${kb} KB / ~5 MB limit<br>
-       Last saved: ${JSON.parse(raw).savedAt?new Date(JSON.parse(raw).savedAt).toLocaleString('en-IN'):'Never'}`;
-    document.getElementById('storage-bar').style.width=pct+'%';
-    document.getElementById('storage-pct').textContent=`${pct}% of localStorage used`;
-  }catch(e){}
-}
-
-function saveBackup(){
-  const backup={version:'2.0',savedAt:new Date().toISOString(),employees,logs};
-  const json=JSON.stringify(backup);
-  downloadBlob(new Blob([json],{type:'application/json'}),`AttendIQ_Backup_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`);
-  sessionBackups.unshift({label:`Backup ${new Date().toLocaleTimeString('en-IN')}`,size:(json.length/1024).toFixed(1)+'KB',ts:Date.now()});
-  renderBackupList();
-  showToast('Backup saved!');
-}
-function renderBackupList(){
-  const list=document.getElementById('backup-list');
-  if(!sessionBackups.length){list.innerHTML='<div style="font-size:11px;color:var(--muted2);font-family:var(--fm);text-align:center;padding:8px">No backups yet</div>';return;}
-  list.innerHTML=sessionBackups.slice(0,5).map(b=>
-    `<div class="backup-item"><span style="font-size:18px">💾</span><div style="flex:1"><div style="font-weight:600">${b.label}</div><div style="font-size:10px;color:var(--muted);font-family:var(--fm)">${b.size}</div></div></div>`
-  ).join('');
-}
-function restoreBackup(e){
-  const file=e.target.files[0];if(!file)return;
-  const reader=new FileReader();
-  reader.onload=ev=>{
-    try{
-      const data=JSON.parse(ev.target.result);
-      if(!data.employees||!data.logs) throw new Error('Invalid backup file');
-      showModal('Restore Backup?',`This will replace all current data with the backup (${data.employees.length} employees, ${data.logs.length} log entries). Current data will be lost.`,()=>{
-        employees=data.employees; logs=data.logs;
-        rebuildMatcher(); saveData(); renderDashboard();
-        showToast(`Restored: ${employees.length} employees, ${logs.length} records`);
-        refreshStorageInfo();
-      },'Restore');
-    }catch(err){showToast('Invalid backup file','error');}
-  };
-  reader.readAsText(file);
-  e.target.value='';
-}
-function confirmClearData(){
-  showModal('Clear ALL Data?','This will permanently delete all employees, face data, and attendance records. This action CANNOT be undone.',()=>{
-    employees=[];logs=[];faceMatcher=null;
-    localStorage.removeItem(STORAGE_KEY);
-    renderDashboard();renderEmployees();
-    showToast('All data cleared','warn');
-    refreshStorageInfo();
-  },'Clear All Data');
-}
-
-// ════════════════════════════════════════════════════════
-//  ELECTRON PACKAGE DOWNLOAD
-// ════════════════════════════════════════════════════════
-function downloadElectronPkg(){
-  showToast('Preparing Electron package…','info');
-  setTimeout(()=>{
-    const pkg=generateElectronPkg();
-    downloadBlob(new Blob([pkg],{type:'text/plain'}),'AttendIQ_Electron_Setup.txt');
-    showToast('Setup instructions downloaded!');
-  },400);
-}
-function generateElectronPkg(){
-  return`====================================================
-  AttendIQ Face Recognition — Desktop Installation Guide
-  ====================================================
-
-  OPTION A: Run as PWA (Easiest, No Install Required)
-  ─────────────────────────────────────────────────────
-  1. Open attendiq-face.html in Google Chrome or Microsoft Edge
-  2. Look for the install icon (⊕) in the address bar
-  3. Click "Install AttendIQ"
-  4. The app opens as a standalone window with offline support
-  5. All data is saved in your browser's localStorage
-
-  OPTION B: Electron Desktop App (Windows / Mac / Linux)
-  ───────────────────────────────────────────────────────
-  Prerequisites: Node.js (https://nodejs.org) must be installed.
-
-  Step 1 — Create project folder:
-    mkdir AttendIQ && cd AttendIQ
-
-  Step 2 — Create package.json:
-  ─────────────────────────────
-  {
-    "name": "attendiq",
-    "version": "2.0.0",
-    "description": "Face Recognition Attendance System",
-    "main": "main.js",
-    "scripts": {
-      "start": "electron .",
-      "build": "electron-builder"
-    },
-    "dependencies": {},
-    "devDependencies": {
-      "electron": "^28.0.0",
-      "electron-builder": "^24.0.0"
-    },
-    "build": {
-      "appId": "com.attendiq.app",
-      "productName": "AttendIQ",
-      "win": { "target": "nsis", "icon": "icon.ico" },
-      "mac": { "target": "dmg", "icon": "icon.icns" },
-      "linux": { "target": "AppImage" }
-    }
-  }
-
-  Step 3 — Create main.js:
-  ─────────────────────────
-  const { app, BrowserWindow } = require('electron');
-  const path = require('path');
-
-  function createWindow() {
-    const win = new BrowserWindow({
-      width: 1400,
-      height: 900,
-      minWidth: 900,
-      minHeight: 600,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true
-      },
-      titleBarStyle: 'hiddenInset',
-      title: 'AttendIQ — Face Recognition Attendance'
-    });
-    win.loadFile('src/index.html');
-  }
-
-  app.whenReady().then(createWindow);
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
-  });
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
-
-  Step 4 — Copy the HTML:
-    • Create folder: AttendIQ/src/
-    • Copy attendiq-face.html → AttendIQ/src/index.html
-
-  Step 5 — Install & Run:
-    npm install
-    npm start
-
-  Step 6 — Build Installer:
-    npm run build
-    → Windows: dist/AttendIQ Setup.exe
-    → Mac:     dist/AttendIQ.dmg
-    → Linux:   dist/AttendIQ.AppImage
-
-  DATA STORAGE NOTE:
-  ─────────────────
-  Data is stored in the browser's localStorage (same location
-  as when running in a browser). Use Settings → Backup to export
-  your data as a JSON file for safekeeping. The backup file can be
-  restored at any time using Settings → Restore.
-
-  SUPPORT:
-  ─────────
-  For issues, open the app's Settings page and use
-  "Save Backup" before reinstalling.
-  ====================================================`;
-}
-
-// ════════════════════════════════════════════════════════
-//  MODAL
-// ════════════════════════════════════════════════════════
-let modalCallback=null;
-function showModal(title,msg,cb,btnLabel='Confirm'){
-  document.getElementById('modal-title').textContent=title;
-  document.getElementById('modal-msg').textContent=msg;
-  document.getElementById('modal-confirm-btn').textContent=btnLabel;
-  modalCallback=cb;
-  document.getElementById('modal-bg').classList.add('open');
-}
-function closeModal(){document.getElementById('modal-bg').classList.remove('open');modalCallback=null;}
-document.getElementById('modal-confirm-btn').onclick=()=>{if(modalCallback)modalCallback();closeModal();};
-document.getElementById('modal-bg').onclick=e=>{if(e.target===e.currentTarget)closeModal();};
-
-// ════════════════════════════════════════════════════════
-//  INIT
-// ════════════════════════════════════════════════════════
-function init(){
-  document.getElementById('page-date').textContent=
-    new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  const loaded=loadData();
-  if(loaded){
-    showToast(`Data restored: ${employees.length} employees, ${logs.length} records`,'info');
-  }
-  renderDashboard();
-  loadModels();
-  startAutoSave();
-  // Save on visibility change (tab switch / close)
-  document.addEventListener('visibilitychange',()=>{ if(document.hidden)saveData(); });
-  window.addEventListener('beforeunload',()=>saveData());
-}
-init();
 </script>
 </body>
 </html>
