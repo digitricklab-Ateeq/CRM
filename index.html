@@ -677,7 +677,6 @@ function logAttendance(data) {
 
 function deleteEmployee(data) {
   const ss = SHEET_ID;
-  const sheet = ss.getSheetByName('Employees');
   if (!sheet) return { status:'error', message:'Sheet not found' };
   const rows = sheet.getDataRange().getValues();
   for (let i = rows.length - 1; i >= 1; i--) {
@@ -718,7 +717,7 @@ function dataToObjects(sheet) {
 // ════════════════════════════════════════════════════
 //  CONFIG — Google Apps Script URL
 // ════════════════════════════════════════════════════
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbzntySVZfGRy5PH8CHVvyksC6iBO6V3UDaCa8Gufu9EGvW0BgQx2RVhicpq-FiW8xdtMw/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxONG9krkrmIGDbHipzB2jA916WiIE8A1pg6fFxBFhWzzCMYx219Zdlq0SJ3tExa2o0FQ/exec';
 const MODELS_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
 const EMP_COLORS = ['#00d4ff','#00ff9d','#ffa502','#ff6b81','#a29bfe','#fd79a8','#55efc4','#fdcb6e'];
 const LOCAL_KEY  = 'attendiq_face_data'; // face descriptors only (not synced to sheets)
@@ -730,7 +729,7 @@ let employees   = [];   // from Google Sheets
 let logs        = [];   // from Google Sheets
 let faceData    = {};   // {empId: {descriptors:[], images:[]}} — localStorage only
 let faceMatcher = null;
-let modelsReady = falsec
+let modelsReady = false
 let THRESHOLD   = 0.40;
 let MATCH_COOLDOWN = 5000;
 let scanMode = 'in';
